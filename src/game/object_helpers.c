@@ -30,6 +30,7 @@
 #include "puppycamold.h"
 #include "game/rovent.h"
 #include "save_file.h"
+#include "game/object_collision.h"
 #include "audio/external.h"
 
 static s32 clear_move_flag(u32 *bitSet, s32 flag);
@@ -644,12 +645,61 @@ f32 cur_obj_dist_to_nearest_object_with_behavior(const BehaviorScript *behavior)
     return dist;
 }
 
+#ifdef ACCELERATED_COLLISION_LOOKUP
+struct nearby_iterator_context {
+    uintptr_t *behaviorAddr;
+    struct Object *result;
+    f32 resultDist;
+    u8 count;
+};
+s32 is_nearby_with_behavior(struct Object *a, struct Object *b, u8 cellX, u8 cellY, u8 cellZ, void* scratch) {
+    struct nearby_iterator_context* ctx = scratch;
+    ctx->count++;
+    if (ctx->count > 9) {
+        // All immediately adjacent cells tested, bail
+        return TRUE;
+    }
+    if (!b || a == b) {
+        return FALSE;
+    }
+    if (b->behavior == ctx->behaviorAddr
+        && b->activeFlags != ACTIVE_FLAG_DEACTIVATED
+    ) {
+        f32 objDist = dist_between_objects(a, b);
+        if (objDist < ctx->resultDist) {
+            ctx->result = b;
+            ctx->resultDist = objDist;
+        }
+        if (objDist > 0x20000) {
+            return TRUE; // once we find an object too far away, bail
+        }
+    }
+    return FALSE;
+}
+#endif // ACCELERATED_COLLISION_LOOKUP
+
 struct Object *cur_obj_find_nearest_object_with_behavior(const BehaviorScript *behavior, f32 *dist) {
     uintptr_t *behaviorAddr = segmented_to_virtual(behavior);
     struct ObjectNode *listHead = &gObjectLists[get_object_list_from_behavior(behaviorAddr)];
     struct Object *obj = (struct Object *) listHead->next;
     struct Object *closestObj = NULL;
     f32 minDist = 0x20000;
+
+#ifdef ACCELERATED_COLLISION_LOOKUP
+    if (listHead == &gObjectLists[OBJ_LIST_SURFACE]) {
+        struct nearby_iterator_context ctx;
+        ctx.behaviorAddr = behaviorAddr;
+        ctx.result = NULL;
+        ctx.resultDist = minDist;
+        ctx.count = 0;
+        iterate_nearby_object_cells(o, &is_nearby_with_behavior, &ctx);
+        if (ctx.result != NULL) {
+            *dist = ctx.resultDist;
+            return ctx.result;
+        }
+        // fallback to exhaustive traversal if nearby check is nonconclusive
+    }
+#endif // ACCELERATED_COLLISION_LOOKUP
 
     while (obj != (struct Object *) listHead) {
         if (obj->behavior == behaviorAddr
@@ -2811,12 +2861,25 @@ void cur_obj_drop_imbued_object(s32 y_offset) {
 }
 
 
+#ifdef ACCELERATED_COLLISION_LOOKUP
+s32 objects_near_to_collision(struct Object *a, struct Object *b, u8 cellX, u8 cellY, u8 cellZ, void* ctx) {
+    if (!b || a == b) {
+        return FALSE;
+    }
+    f32 sqrLateralDist;
+    vec3f_get_lateral_dist_squared(&a->oPosVec, &b->oPosVec, &sqrLateralDist);
+    return sqrLateralDist < sqr(a->oCollisionDistance);
+}
+#endif // ACCELERATED_COLLISION_LOOKUP
+
 struct Object * physics_object_list_head = NULL;
 struct Object * physics_object_list_tail = NULL;
 
 s32 obj_with_physics_is_near(void) {
     if (physics_object_list_head == NULL) {return FALSE;}
-
+#ifdef ACCELERATED_COLLISION_LOOKUP
+    return iterate_nearby_object_cells(o, &objects_near_to_collision, NULL);
+#else
     struct Object * obj = physics_object_list_head;
     while (obj != NULL) {
         if (obj == o || obj == o->prevObj) {obj = obj->nextPhysicsObj; continue;}
@@ -2829,6 +2892,7 @@ s32 obj_with_physics_is_near(void) {
     }
 
     return FALSE;
+#endif // ACCELERATED_COLLISION_LOOKUP
 }
 
 void obj_add_self_to_physics_list(void) {

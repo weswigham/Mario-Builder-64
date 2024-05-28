@@ -34,3 +34,9 @@
  */
 #define COLLISION_DATA_TYPE s16
 #define ROOM_DATA_TYPE s8
+
+/**
+ * Allocate a chunk of memory for an acceleration structure for dynamic object adjacency queries. This improves collision speed, drastically when many objects are present,
+ * at the cost of a fixed memory overhead. This only affects OBJ_LIST_SURFACE objects.
+ */
+#define ACCELERATED_COLLISION_LOOKUP 1

@@ -39,7 +39,11 @@ enum ProfilerTime {
     PROFILER_TIME_MARIO,
     PROFILER_TIME_BEHAVIOR_AFTER_MARIO,
     PROFILER_TIME_GFX,
-    PROFILER_TIME_COLLISION,
+    PROFILER_TIME_COLLISION_FLOOR,
+    PROFILER_TIME_COLLISION_WALL,
+    PROFILER_TIME_COLLISION_CEIL,
+    PROFILER_TIME_COLLISION_LOAD,
+    PROFILER_TIME_COLLISION_RAYCAST,
     PROFILER_TIME_CAMERA,
 #ifdef PUPPYPRINT_DEBUG
     PROFILER_TIME_PUPPYPRINT1,
@@ -100,7 +104,7 @@ void profiler_audio_completed();
 #ifdef PUPPYPRINT_DEBUG
 void profiler_collision_reset();
 void profiler_collision_completed();
-void profiler_collision_update(u32 time);
+void profiler_collision_update(u32 time, enum ProfilerTime kind);
 #else
 #define profiler_collision_reset()
 #define profiler_collision_completed()

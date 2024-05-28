@@ -22,7 +22,11 @@ u32 prev_time;
 u32 audio_start;
 u32 audio_buffer_index;
 u32 preempted_time;
-u32 collision_time = 0;
+u32 collision_time_floor = 0;
+u32 collision_time_wall = 0;
+u32 collision_time_ceil = 0;
+u32 collision_time_load = 0;
+u32 collision_time_raycast = 0;
 
 #ifdef AUDIO_PROFILING
 u32 audio_subset_starts[AUDIO_SUBSET_SIZE];
@@ -98,23 +102,54 @@ void profiler_audio_started() {
 #ifdef PUPPYPRINT_DEBUG
 
 void profiler_collision_reset() {
-    collision_time = 0;
+    collision_time_floor = 0;
+    collision_time_wall = 0;
+    collision_time_ceil = 0;
+    collision_time_load = 0;
+    collision_time_raycast = 0;
 }
 
-void profiler_collision_update(u32 time) {
-    collision_time += osGetCount() - time;
+u32* accumulator_for_profile(enum ProfilerTime kind) {
+    switch (kind) {
+        case PROFILER_TIME_COLLISION_FLOOR:
+            return &collision_time_floor;
+        case PROFILER_TIME_COLLISION_CEIL:
+            return &collision_time_ceil;
+        case PROFILER_TIME_COLLISION_WALL:
+            return &collision_time_wall;
+        case PROFILER_TIME_COLLISION_LOAD:
+            return &collision_time_load;
+        case PROFILER_TIME_COLLISION_RAYCAST:
+            return &collision_time_raycast;
+        default:
+            return &collision_time_wall;
+    }
+}
+
+void profiler_collision_update(u32 time, enum ProfilerTime kind) {
+    u32 diff = osGetCount() - time;
+    u32* acc = accumulator_for_profile(kind);
+    *acc += diff;
 }
 
 void profiler_collision_completed() {
-    ProfileTimeData* cur_data = &all_profiling_data[PROFILER_TIME_COLLISION];
-    buffer_update(cur_data, collision_time, profile_buffer_index);
+    ProfileTimeData* cur_data = &all_profiling_data[PROFILER_TIME_COLLISION_FLOOR];
+    buffer_update(cur_data, *accumulator_for_profile(PROFILER_TIME_COLLISION_FLOOR), profile_buffer_index);
+    ProfileTimeData* cur_data2 = &all_profiling_data[PROFILER_TIME_COLLISION_CEIL];
+    buffer_update(cur_data2, *accumulator_for_profile(PROFILER_TIME_COLLISION_CEIL), profile_buffer_index);
+    ProfileTimeData* cur_data3 = &all_profiling_data[PROFILER_TIME_COLLISION_WALL];
+    buffer_update(cur_data3, *accumulator_for_profile(PROFILER_TIME_COLLISION_WALL), profile_buffer_index);
+    ProfileTimeData* cur_data4 = &all_profiling_data[PROFILER_TIME_COLLISION_LOAD];
+    buffer_update(cur_data4, *accumulator_for_profile(PROFILER_TIME_COLLISION_LOAD), profile_buffer_index);
+    ProfileTimeData* cur_data5 = &all_profiling_data[PROFILER_TIME_COLLISION_RAYCAST];
+    buffer_update(cur_data5, *accumulator_for_profile(PROFILER_TIME_COLLISION_RAYCAST), profile_buffer_index);
 }
 
 #endif
 
 u32 profiler_get_delta(enum ProfilerDeltaTime which) {
     if (which == PROFILER_DELTA_COLLISION) {
-        return collision_time;
+        return collision_time_wall + collision_time_ceil + collision_time_floor + collision_time_load + collision_time_raycast;
     } else {
         return 0;
     }
@@ -268,7 +303,11 @@ void profiler_print_times() {
             "CPU\t\t%d (%d%%)\n"
             " Input\t\t%d\n"
 #ifdef PUPPYPRINT_DEBUG
-            " Collision\t\t%d\n"
+            " Collision load\t\t%d\n"
+            " Collision ray\t\t%d\n"
+            " Collision floor\t\t%d\n"
+            " Collision ceil\t\t%d\n"
+            " Collision wall\t\t%d\n"
 #else
             " Dynamic\t\t%d\n"
 #endif
@@ -292,7 +331,11 @@ void profiler_print_times() {
             total_cpu, total_cpu / 333, 
             microseconds[PROFILER_TIME_CONTROLLERS],
 #ifdef PUPPYPRINT_DEBUG
-            microseconds[PROFILER_TIME_COLLISION],
+            microseconds[PROFILER_TIME_COLLISION_LOAD],
+            microseconds[PROFILER_TIME_COLLISION_RAYCAST],
+            microseconds[PROFILER_TIME_COLLISION_FLOOR],
+            microseconds[PROFILER_TIME_COLLISION_CEIL],
+            microseconds[PROFILER_TIME_COLLISION_WALL],
 #else
             microseconds[PROFILER_TIME_DYNAMIC],
 #endif

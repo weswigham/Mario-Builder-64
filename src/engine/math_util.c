@@ -1526,24 +1526,24 @@ void find_surface_on_ray_list(struct SurfaceNode *list, Vec3f orig, Vec3f dir, f
             *max_length = length;
         }
     }
-    profiler_collision_update(first);
+    profiler_collision_update(first, PROFILER_TIME_COLLISION_RAYCAST);
 }
 
-void find_surface_on_ray_cell(s32 cellX, s32 cellZ, Vec3f orig, Vec3f normalized_dir, f32 dir_length, struct Surface **hit_surface, Vec3f hit_pos, f32 *max_length, s32 flags) {
+void find_surface_on_ray_cell(s32 cellX, s32 cellZ, s32 cellY, Vec3f orig, Vec3f normalized_dir, f32 dir_length, struct Surface **hit_surface, Vec3f hit_pos, f32 *max_length, s32 flags) {
     // Skip if OOB
     if ((cellX >= 0) && (cellX <= (NUM_CELLS - 1)) && (cellZ >= 0) && (cellZ <= (NUM_CELLS - 1))) {
         // Iterate through each surface in this partition
         if ((normalized_dir[1] > -NEAR_ONE) && (flags & RAYCAST_FIND_CEIL)) {
-            find_surface_on_ray_list( gStaticSurfacePartition[cellZ][cellX][SPATIAL_PARTITION_CEILS ], orig, normalized_dir, dir_length, hit_surface, hit_pos, max_length);
-            find_surface_on_ray_list(gDynamicSurfacePartition[cellZ][cellX][SPATIAL_PARTITION_CEILS ], orig, normalized_dir, dir_length, hit_surface, hit_pos, max_length);
+            find_surface_on_ray_list( gStaticSurfacePartition[cellZ][cellX][cellY][SPATIAL_PARTITION_CEILS ], orig, normalized_dir, dir_length, hit_surface, hit_pos, max_length);
+            find_surface_on_ray_list(gDynamicSurfacePartition[cellZ][cellX][cellY][SPATIAL_PARTITION_CEILS ], orig, normalized_dir, dir_length, hit_surface, hit_pos, max_length);
         }
         if ((normalized_dir[1] <  NEAR_ONE) && (flags & RAYCAST_FIND_FLOOR)) {
-            find_surface_on_ray_list( gStaticSurfacePartition[cellZ][cellX][SPATIAL_PARTITION_FLOORS], orig, normalized_dir, dir_length, hit_surface, hit_pos, max_length);
-            find_surface_on_ray_list(gDynamicSurfacePartition[cellZ][cellX][SPATIAL_PARTITION_FLOORS], orig, normalized_dir, dir_length, hit_surface, hit_pos, max_length);
+            find_surface_on_ray_list( gStaticSurfacePartition[cellZ][cellX][cellY][SPATIAL_PARTITION_FLOORS], orig, normalized_dir, dir_length, hit_surface, hit_pos, max_length);
+            find_surface_on_ray_list(gDynamicSurfacePartition[cellZ][cellX][cellY][SPATIAL_PARTITION_FLOORS], orig, normalized_dir, dir_length, hit_surface, hit_pos, max_length);
         }
         if (flags & RAYCAST_FIND_WALL) {
-            find_surface_on_ray_list( gStaticSurfacePartition[cellZ][cellX][SPATIAL_PARTITION_WALLS ], orig, normalized_dir, dir_length, hit_surface, hit_pos, max_length);
-            find_surface_on_ray_list(gDynamicSurfacePartition[cellZ][cellX][SPATIAL_PARTITION_WALLS ], orig, normalized_dir, dir_length, hit_surface, hit_pos, max_length);
+            find_surface_on_ray_list( gStaticSurfacePartition[cellZ][cellX][cellY][SPATIAL_PARTITION_WALLS ], orig, normalized_dir, dir_length, hit_surface, hit_pos, max_length);
+            find_surface_on_ray_list(gDynamicSurfacePartition[cellZ][cellX][cellY][SPATIAL_PARTITION_WALLS ], orig, normalized_dir, dir_length, hit_surface, hit_pos, max_length);
         }
     }
 }
@@ -1566,12 +1566,14 @@ f32 find_surface_on_ray(Vec3f orig, Vec3f dir, struct Surface **hit_surface, Vec
     // Get the start and end coords converted to cell-space
     f32 start_cell_coord_x = (orig[0] + LEVEL_BOUNDARY_MAX) * invcell;
     f32 start_cell_coord_z = (orig[2] + LEVEL_BOUNDARY_MAX) * invcell;
+    f32 start_cell_coord_y = (orig[1] + LEVEL_BOUNDARY_MAX) * invcell;
     f32 end_cell_coord_x   = (orig[0] + dir[0] + LEVEL_BOUNDARY_MAX) * invcell;
     f32 end_cell_coord_z   = (orig[2] + dir[2] + LEVEL_BOUNDARY_MAX) * invcell;
+    f32 end_cell_coord_y   = (orig[1] + dir[1] + LEVEL_BOUNDARY_MAX) * invcell;
 
     // Don't do grid traversal if straight down
     if ((normalized_dir[1] >= NEAR_ONE) || (normalized_dir[1] <= -NEAR_ONE)) {
-        find_surface_on_ray_cell((s32)start_cell_coord_x, (s32)start_cell_coord_z, orig, normalized_dir, dir_length, hit_surface, hit_pos, &max_length, flags);
+        find_surface_on_ray_cell((s32)start_cell_coord_x, (s32)start_cell_coord_z, (s32)start_cell_coord_y, orig, normalized_dir, dir_length, hit_surface, hit_pos, &max_length, flags);
         return max_length;
     }
 
@@ -1579,31 +1581,49 @@ f32 find_surface_on_ray(Vec3f orig, Vec3f dir, struct Surface **hit_surface, Vec
     // Adapted from implementation at https://www.shadertoy.com/view/XddcWn
     f32 rd_x = end_cell_coord_x - start_cell_coord_x;
     f32 rd_z = end_cell_coord_z - start_cell_coord_z;
+    f32 rd_y = end_cell_coord_y - start_cell_coord_y;
     f32 p_x = (s32)start_cell_coord_x;
     f32 p_z = (s32)start_cell_coord_z;
+    f32 p_y = (s32)start_cell_coord_y;
     f32 rdinv_x = 1.0f / rd_x;
     f32 rdinv_z = 1.0f / rd_z;
+    f32 rdinv_y = 1.0f / rd_y;
     f32 stp_x = signum_positive(rd_x);
     f32 stp_z = signum_positive(rd_z);
+    f32 stp_y = signum_positive(rd_y);
     f32 delta_x = MIN(rdinv_x * stp_x, 1.0f);
     f32 delta_z = MIN(rdinv_z * stp_z, 1.0f);
+    f32 delta_y = MIN(rdinv_y * stp_y, 1.0f);
     f32 t_max_x = ABS((p_x + MAX(stp_x, 0.0f) - start_cell_coord_x) * rdinv_x);
     f32 t_max_z = ABS((p_z + MAX(stp_z, 0.0f) - start_cell_coord_z) * rdinv_z);
+    f32 t_max_y = ABS((p_y + MAX(stp_y, 0.0f) - start_cell_coord_y) * rdinv_y);
 
     while (TRUE) {
-        find_surface_on_ray_cell((s32)p_x, (s32)p_z, orig, normalized_dir, dir_length, hit_surface, hit_pos, &max_length, flags);
-        f32 t_next = MIN(t_max_x, t_max_z);
+        find_surface_on_ray_cell((s32)p_x, (s32)p_z, (s32)p_y, orig, normalized_dir, dir_length, hit_surface, hit_pos, &max_length, flags);
+        f32 t_next = MIN(MIN(t_max_x, t_max_z), t_max_y);
         if (t_next > 1.0f) {
             break;
         }
 
         if (t_max_x < t_max_z) {
-            t_max_x += delta_x;
-            p_x += stp_x;
+            if (t_max_y < t_max_x) {
+                t_max_y += delta_y;
+                p_y += stp_y;
+            }
+            else {
+                t_max_x += delta_x;
+                p_x += stp_x;
+            }
         }
         else {
-            t_max_z += delta_z;
-            p_z += stp_z;
+            if (t_max_y < t_max_z) {
+                t_max_y += delta_y;
+                p_y += stp_y;
+            }
+            else {
+                t_max_z += delta_z;
+                p_z += stp_z;
+            }
         }
     }
     return max_length;

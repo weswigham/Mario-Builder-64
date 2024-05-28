@@ -63,7 +63,7 @@ s32 cmm_get_water_level(s32 x, s32 y, s32 z); // in other file
 // s32 find_water_level(s32 x, s32 z);
 s32 find_poison_gas_level(s32 x, s32 z);
 #ifdef VANILLA_DEBUG
-void debug_surface_list_info(f32 xPos, f32 zPos);
+void debug_surface_list_info(f32 xPos, f32 zPos, f32 yPos);
 #endif
 
 #endif // SURFACE_COLLISION_H

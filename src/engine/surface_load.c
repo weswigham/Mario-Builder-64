@@ -19,13 +19,14 @@
 
 /**
  * Partitions for course and object surfaces. The arrays represent
- * the 16x16 cells that each level is split into.
+ * the 16x16x16 cells that each level is split into.
  */
-SpatialPartitionCell gStaticSurfacePartition[NUM_CELLS][NUM_CELLS];
-SpatialPartitionCell gDynamicSurfacePartition[NUM_CELLS][NUM_CELLS];
+SpatialPartitionCell gStaticSurfacePartition[NUM_CELLS][NUM_CELLS][NUM_CELLS];
+SpatialPartitionCell gDynamicSurfacePartition[NUM_CELLS][NUM_CELLS][NUM_CELLS];
 struct CellCoords {
     u8 z;
     u8 x;
+    u8 y;
     u8 partition;
 };
 struct CellCoords sCellsUsed[NUM_CELLS];
@@ -87,7 +88,7 @@ struct Surface *alloc_surface(u32 dynamic) {
  * Iterates through the entire partition, clearing the surfaces.
  */
 static void clear_spatial_partition(SpatialPartitionCell *cells) {
-    register s32 i = sqr(NUM_CELLS);
+    register s32 i = sqr(NUM_CELLS) * NUM_CELLS;
 
     while (i--) {
         (*cells)[SPATIAL_PARTITION_FLOORS] = NULL;
@@ -103,7 +104,7 @@ static void clear_spatial_partition(SpatialPartitionCell *cells) {
  */
 static void clear_static_surfaces(void) {
     gTotalStaticSurfaceData = 0;
-    clear_spatial_partition(&gStaticSurfacePartition[0][0]);
+    clear_spatial_partition(&gStaticSurfacePartition[0][0][0]);
 }
 
 /**
@@ -113,7 +114,7 @@ static void clear_static_surfaces(void) {
  * @param cellZ The Z position of the cell in which the surface resides
  * @param surface The surface to add
  */
-static void add_surface_to_cell(s32 dynamic, s32 cellX, s32 cellZ, struct Surface *surface) {
+static void add_surface_to_cell(s32 dynamic, s32 cellX, s32 cellZ, s32 cellY, struct Surface *surface) {
     struct SurfaceNode *list;
     s32 priority;
     s32 sortDir = 1; // highest to lowest, then insertion order (water and floors)
@@ -138,19 +139,20 @@ static void add_surface_to_cell(s32 dynamic, s32 cellX, s32 cellZ, struct Surfac
     newNode->surface = surface;
 
     if (dynamic) {
-        list = &gDynamicSurfacePartition[cellZ][cellX][listIndex];
+        list = &gDynamicSurfacePartition[cellZ][cellX][cellY][listIndex];
         if (sNumCellsUsed >= sizeof(sCellsUsed) / sizeof(struct CellCoords)) {
             sClearAllCells = TRUE;
         } else {
             if (list->next == NULL) {
                 sCellsUsed[sNumCellsUsed].z = cellZ;
                 sCellsUsed[sNumCellsUsed].x = cellX;
+                sCellsUsed[sNumCellsUsed].y = cellY;
                 sCellsUsed[sNumCellsUsed].partition = listIndex;
                 sNumCellsUsed++;
             }
         }
     } else {
-        list = &gStaticSurfacePartition[cellZ][cellX][listIndex];
+        list = &gStaticSurfacePartition[cellZ][cellX][cellY][listIndex];
     }
 
     // Loop until we find the appropriate place for the surface in the list.
@@ -206,20 +208,25 @@ static s32 upper_cell_index(s32 coord) {
  * @param dynamic Boolean determining whether the surface is static or dynamic
  */
 void add_surface(struct Surface *surface, s32 dynamic) {
-    s32 cellZ, cellX;
-    s32 minX, maxX, minZ, maxZ;
+    s32 cellZ, cellX, cellY;
+    s32 minX, maxX, minZ, maxZ, minY, maxY;
 
     min_max_3i(surface->vertex1[0], surface->vertex2[0], surface->vertex3[0], &minX, &maxX);
     min_max_3i(surface->vertex1[2], surface->vertex2[2], surface->vertex3[2], &minZ, &maxZ);
+    min_max_3i(surface->vertex1[1], surface->vertex2[1], surface->vertex3[1], &minY, &maxY);
 
     s32 minCellX = lower_cell_index(minX);
     s32 maxCellX = MAX(upper_cell_index(maxX), minCellX);
     s32 minCellZ = lower_cell_index(minZ);
     s32 maxCellZ = MAX(upper_cell_index(maxZ), minCellZ);
+    s32 minCellY = lower_cell_index(minY);
+    s32 maxCellY = MAX(upper_cell_index(maxY), minCellY);
 
     for (cellZ = minCellZ; cellZ <= maxCellZ; cellZ++) {
         for (cellX = minCellX; cellX <= maxCellX; cellX++) {
-            add_surface_to_cell(dynamic, cellX, cellZ, surface);
+            for (cellY = minCellY; cellY <= maxCellY; cellY++) {
+                add_surface_to_cell(dynamic, cellX, cellZ, cellY, surface);
+            }
         }
     }
 }
@@ -479,7 +486,7 @@ void load_area_terrain(s32 index, TerrainData *data, RoomData *surfaceRooms, s16
 
     gNumStaticSurfaceNodes = gSurfaceNodesAllocated;
     gNumStaticSurfaces = gSurfacesAllocated;
-    profiler_collision_update(first);
+    profiler_collision_update(first, PROFILER_TIME_COLLISION_LOAD);
 }
 
 /**
@@ -494,16 +501,16 @@ void clear_dynamic_surfaces(void) {
         gSurfaceNodesAllocated = gNumStaticSurfaceNodes;
         gDynamicSurfacePoolEnd = gDynamicSurfacePool;
         if (sClearAllCells) {
-            clear_spatial_partition(&gDynamicSurfacePartition[0][0]);
+            clear_spatial_partition(&gDynamicSurfacePartition[0][0][0]);
         } else {
             for (u32 i = 0; i < sNumCellsUsed; i++) {
-                gDynamicSurfacePartition[sCellsUsed[i].z][sCellsUsed[i].x][sCellsUsed[i].partition] = NULL;
+                gDynamicSurfacePartition[sCellsUsed[i].z][sCellsUsed[i].x][sCellsUsed[i].y][sCellsUsed[i].partition] = NULL;
             }
         }
         sNumCellsUsed = 0;
         sClearAllCells = FALSE;
     }
-    profiler_collision_update(first);
+    profiler_collision_update(first, PROFILER_TIME_COLLISION_LOAD);
 }
 
 /**
@@ -643,16 +650,8 @@ void load_object_collision_model(void) {
         }
     }
 
-    f32 marioDist = o->oDistanceToMario;
-
-    // On an object's first frame, the distance is set to 19000.0f.
-    // If the distance hasn't been updated, update it now.
-    if (marioDist == 19000.0f) {
-        marioDist = dist_between_objects(o, gMarioObject);
-    }
-
     //COND_BIT((marioDist < o->oDrawingDistance), o->header.gfx.node.flags, GRAPH_RENDER_ACTIVE);
-    profiler_collision_update(first);
+    profiler_collision_update(first, PROFILER_TIME_COLLISION_LOAD);
 }
 
 /**
@@ -684,5 +683,5 @@ void load_object_static_model(void) {
     gNumStaticSurfaceNodes = gSurfaceNodesAllocated;
     gNumStaticSurfaces = gSurfacesAllocated;
     o->collisionData = NULL;
-    profiler_collision_update(first);
+    profiler_collision_update(first, PROFILER_TIME_COLLISION_LOAD);
 }
